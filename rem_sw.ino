@@ -4,7 +4,7 @@
 #include <UIPEthernet.h>
 
 #define RELAY_COUNT 6
-#define EEPROM_MAGIC 0x5250
+#define EEPROM_MAGIC 0x5255
 #define ETHERNET_CS_PIN 10
 #define COUNT_MASK 0x07
 #define DHCP_FLAG 0x08
@@ -18,6 +18,7 @@ EthernetServer server(80);
 unsigned char relay_status = 0;
 unsigned char feedback_status = 0;
 bool relay_state_dirty = false;
+char text_buffer[LABEL_SIZE];
 
 struct NetworkConfig {
   uint16_t magic;
@@ -188,16 +189,17 @@ void apply_network_config(const char* request) {
 
 // Applies the page label and relay headers from a request.
 void apply_headers_config(const char* request) {
-  char key[4], header[HEADER_SIZE], label[LABEL_SIZE];
   if (strstr(request, "label=") != NULL) {
-    query_value(request, "label=", label, sizeof(label));
-    write_text(LABEL_EEPROM_ADDRESS, label, LABEL_SIZE);
+    query_value(request, "label=", text_buffer, sizeof(text_buffer));
+    write_text(LABEL_EEPROM_ADDRESS, text_buffer, LABEL_SIZE);
   }
   for (byte index = 0; index < RELAY_COUNT; index++) {
+    char key[4];
     snprintf(key, sizeof(key), "h%u=", index);
-    header[0] = '\0';
-    query_value(request, key, header, sizeof(header));
-    if (strstr(request, key) != NULL) write_text(HEADER_EEPROM_ADDRESS + index * HEADER_SIZE, header, HEADER_SIZE);
+    if (strstr(request, key) != NULL) {
+      query_value(request, key, text_buffer, HEADER_SIZE);
+      write_text(HEADER_EEPROM_ADDRESS + index * HEADER_SIZE, text_buffer, HEADER_SIZE);
+    }
   }
 }
 
@@ -211,13 +213,12 @@ void send_http_headers(EthernetClient& client) {
 
 // Renders the shared page header and opening HTML.
 void page_header(EthernetClient& client) {
-  char label[LABEL_SIZE];
-  read_text(LABEL_EEPROM_ADDRESS, label, sizeof(label));
+  read_text(LABEL_EEPROM_ADDRESS, text_buffer, sizeof(text_buffer));
   send_http_headers(client);
   client.println(F("<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width'><title>Remote Switch Controller - KI2L</title><style>body{font:16px sans-serif;max-width:900px;margin:auto;padding:12px;text-align:center}header,footer{padding:12px 0;text-align:center}main{display:flex;justify-content:center}table{border-collapse:collapse;margin:20px auto}td,th{border:1px solid #ddd;padding:10px;text-align:center}button{padding:10px 14px;font-size:14px}.relay{width:100%;height:100%}.on{background:#8f8}.off{background:#f8b0b0}.header{background-color: "));
   client.print(relay_state_dirty ? F("#ff6666") : F("#66cc66"));
   client.print(F(";}a{margin-right:14px}.logo{display:block;margin:0 auto}</style></head><body><header class='header'><h3>Remote Switch Controller - KI2L</h3><img class='logo' src='https://w2sz.org/images/W2SZ_small.gif' alt='W2SZ'><h3>"));
-  client.print(label);
+  client.print(text_buffer);
   client.println(F("</h3></header>"));
 }
 
@@ -253,11 +254,10 @@ void send_page(EthernetClient& client, const char* request) {
     return;
   }
   if (strstr(request, "GET /headers") != NULL && !headers_saved) {
-    char label[LABEL_SIZE], header[HEADER_SIZE];
-    read_text(LABEL_EEPROM_ADDRESS, label, sizeof(label));
+    read_text(LABEL_EEPROM_ADDRESS, text_buffer, sizeof(text_buffer));
     page_header(client);
-    client.print(F("<main><h2>Headers</h2><form action='/headers' method='get'>Label <input maxlength='20' name='label' value='")); client.print(label); client.println(F("'><br>"));
-    for (byte index = 0; index < RELAY_COUNT; index++) { read_text(HEADER_EEPROM_ADDRESS + index * HEADER_SIZE, header, sizeof(header)); client.print(F("Column ")); client.print(index + 1); client.print(F(" <input maxlength='8' name='h")); client.print(index); client.print(F("' value='")); client.print(header); client.println(F("'><br>")); }
+    client.print(F("<main><h2>Headers</h2><form action='/headers' method='get'>Label <input maxlength='20' name='label' value='")); client.print(text_buffer); client.println(F("'><br>"));
+    for (byte index = 0; index < RELAY_COUNT; index++) { read_text(HEADER_EEPROM_ADDRESS + index * HEADER_SIZE, text_buffer, HEADER_SIZE); client.print(F("Column ")); client.print(index + 1); client.print(F(" <input maxlength='8' name='h")); client.print(index); client.print(F("' value='")); client.print(text_buffer); client.println(F("'><br>")); }
     client.println(F("<button type='submit'>Save headers</button> <a href='/'><button type='button'>Cancel</button></a></form></main>"));
     page_footer(client);
     return;
@@ -266,9 +266,8 @@ void send_page(EthernetClient& client, const char* request) {
   read_relay_status();
   client.println(F("<main><table><tr>"));
   for (byte index = 0; index < active_relay_count(); index++) {
-    char header[HEADER_SIZE];
-    read_text(HEADER_EEPROM_ADDRESS + index * HEADER_SIZE, header, sizeof(header));
-    client.print(F("<th>")); client.print(header); client.print(F("</th>"));
+    read_text(HEADER_EEPROM_ADDRESS + index * HEADER_SIZE, text_buffer, HEADER_SIZE);
+    client.print(F("<th>")); client.print(text_buffer); client.print(F("</th>"));
   }
   client.println(F("</tr><tr>"));
   for (byte index = 0; index < active_relay_count(); index++) {
