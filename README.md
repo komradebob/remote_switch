@@ -19,7 +19,7 @@ Check the exact voltage requirements of the specific ENC28J60 module before powe
 
 Open `rem_sw.ino` in the Arduino IDE, select the Arduino Pro or Pro Mini board and the correct processor/clock, select the serial port, then install `UIPEthernet` and upload. The sketch uses DHCP or the static values in `network_config` depending on the EEPROM configuration.
 
-The factory default is DHCP, exclusive relay operation, six active relays, and headers `One` through `Six`. The fallback static address is `192.168.1.50`. Use **Configure System** to set DHCP/static mode, IP settings, active relay count, exclusive/non-exclusive operation, the centered label, and column headers. Configuration saves return to the dashboard. EEPROM actions are available as buttons in the page footer.
+The dashboard uses DHCP by default, six relay controls, EEPROM-backed headers, and the tested UIPEthernet server loop. The fallback static address is `192.168.1.50`. **Configure** opens a chooser with separate short pages for network/relay mode and labels/headers, avoiding oversized configuration requests. EEPROM actions are available as colored buttons in the page footer.
 
 ## Hardware extension points
 
@@ -28,7 +28,7 @@ The factory default is DHCP, exclusive relay operation, six active relays, and h
 - `read_relay_status()` reads feedback pins 14, 15, 16, 17, A6, and A7, least significant bit first. Digital inputs use active-low `INPUT_PULLUP`; analog inputs use active-low threshold 512.
 - Customize the page header in `page_header()` and footer actions in `page_footer()`.
 
-The dashboard reads feedback when a page is requested and displays it below the relay command buttons. Relay command state is stored separately from feedback state.
+The dashboard reads feedback when a page is requested and displays it below the relay command buttons. Relay command state is stored separately from feedback state. Relay buttons use direct links and reload the dashboard after a command.
 
 ## Hardware tests
 
