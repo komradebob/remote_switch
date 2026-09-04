@@ -29,3 +29,9 @@ The factory default is DHCP, exclusive relay operation, six active relays, and h
 - Customize the page header in `page_header()` and footer actions in `page_footer()`.
 
 The dashboard reads feedback when a page is requested and displays it below the relay command buttons. Relay command state is stored separately from feedback state.
+
+## Hardware tests
+
+`simple_relay_test/simple_relay_test.ino` is a serial-only mapping test. It drives each output on pins 2 through 7 ON and OFF, waits 100 ms for the relay indicator to settle, samples inputs 14, 15, 16, 17, A6, and A7 five times, and reports which inputs changed. It runs at 115200 baud and leaves all outputs OFF.
+
+`ethernet_relay_test/ethernet_relay_test.ino` adds UIPEthernet to the same mapping test. Upload it, read the DHCP address at 115200 baud, then open `/cycle` on the device to run the sequence over Ethernet. The cycle results are printed on the serial port and all outputs are left OFF afterward.
