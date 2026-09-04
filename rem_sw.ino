@@ -1,3 +1,4 @@
+// Remote Switch Controller v0.1.0 (base checkpoint: 4f06f7b)
 #include <SPI.h>
 #include <EEPROM.h>
 #include <UIPEthernet.h>
@@ -11,8 +12,6 @@
 #define COLUMNS_FLAG 0x20
 #define HEADER_SIZE 9
 #define LABEL_SIZE 21
-static const byte output_pins[RELAY_COUNT] = { 2, 3, 4, 5, 6, 7 };
-static const byte input_pins[RELAY_COUNT] = { 14, 15, 16, 17, A6, A7 };
 static byte mac_address[] = { 0x02, 0x52, 0x4C, 0x59, 0x01, 0x02 };
 
 EthernetServer server(80);
@@ -39,51 +38,63 @@ NetworkConfig network_config = {
   { 192, 168, 1, 1 }, { 255, 255, 255, 0 }
 };
 
+// Returns whether a relay command bit is ON.
 bool relay_is_on(byte index) { return (relay_status & (1 << index)) != 0; }
 
+// Returns whether DHCP is enabled.
 bool use_dhcp() { return (network_config.options & DHCP_FLAG) != 0; }
+// Returns whether exclusive relay mode is enabled.
 bool exclusive_relays() { return (network_config.options & EXCLUSIVE_FLAG) != 0; }
+// Returns the configured number of active relays.
 byte active_relay_count() { byte count = network_config.options & COUNT_MASK; return count < 1 || count > RELAY_COUNT ? RELAY_COUNT : count; }
+// Declares the EEPROM default label/header initializer.
 void save_default_text();
 
+// Drives output pins 2 through 7 from relay_status.
 void update_relays() {
   for (byte index = 0; index < RELAY_COUNT; index++) {
-    digitalWrite(output_pins[index], relay_is_on(index) ? HIGH : LOW);
+    digitalWrite(2 + index, relay_is_on(index) ? HIGH : LOW);
   }
 }
 
+// Samples active-low relay feedback into one packed byte.
 unsigned char* read_relay_status() {
   feedback_status = 0;
   for (byte index = 0; index < RELAY_COUNT; index++) {
-    bool input_bit = index < 4 ? digitalRead(input_pins[index]) == LOW : analogRead(input_pins[index]) <= 512;
+    bool input_bit = index < 4 ? digitalRead(14 + index) == LOW : analogRead(index == 4 ? A6 : A7) <= 512;
     feedback_status |= input_bit << index;
   }
   return &feedback_status;
 }
 
+// Sets or clears one relay command bit.
 void set_relay(byte index, bool enabled) {
   if (enabled) relay_status |= 1 << index;
   else relay_status &= ~(1 << index);
 }
 
+// Restores factory network, relay, label, and header defaults.
 void load_defaults() {
   network_config = { EEPROM_MAGIC, DHCP_FLAG | EXCLUSIVE_FLAG | COLUMNS_FLAG | RELAY_COUNT, { 192, 168, 1, 50 }, { 192, 168, 1, 1 }, { 192, 168, 1, 1 }, { 255, 255, 255, 0 } };
   relay_status = 0;
   save_default_text();
 }
 
+// Loads saved configuration and relay state from EEPROM.
 void load_eeprom() {
   EEPROM.get(0, network_config);
   if (network_config.magic != EEPROM_MAGIC) load_defaults();
   EEPROM.get(RELAY_EEPROM_ADDRESS, relay_status);
 }
 
+// Saves configuration and commanded relay state to EEPROM.
 void save_eeprom() {
   EEPROM.put(0, network_config);
   EEPROM.put(RELAY_EEPROM_ADDRESS, relay_status);
   relay_state_dirty = false;
 }
 
+// Restores configuration and commanded relay state from EEPROM.
 void restore_eeprom() {
   EEPROM.get(0, network_config);
   if (network_config.magic == EEPROM_MAGIC) {
@@ -93,16 +104,19 @@ void restore_eeprom() {
   }
 }
 
+// Turns off all commanded relays.
 void clear_relays() {
   relay_status = 0;
   update_relays();
   relay_state_dirty = true;
 }
 
+// Formats a four-byte address as dotted-decimal text.
 void print_ip(char* destination, size_t size, const byte address[4]) {
   snprintf(destination, size, "%u.%u.%u.%u", address[0], address[1], address[2], address[3]);
 }
 
+// Writes a bounded text field to EEPROM.
 void write_text(int address, const char* value, byte size) {
   for (byte index = 0; index < size; index++) {
     EEPROM.update(address + index, value[index]);
@@ -111,6 +125,7 @@ void write_text(int address, const char* value, byte size) {
   EEPROM.update(address + size - 1, '\0');
 }
 
+// Reads a bounded EEPROM text field and terminates it.
 void read_text(int address, char* value, byte size) {
   for (byte index = 0; index < size - 1; index++) {
     value[index] = EEPROM.read(address + index);
@@ -122,12 +137,14 @@ void read_text(int address, char* value, byte size) {
   value[size - 1] = '\0';
 }
 
+// Writes default label and column headers to EEPROM.
 void save_default_text() {
   const char* defaults[RELAY_COUNT] = { "One", "Two", "Three", "Four", "Five", "Six" };
   for (byte index = 0; index < RELAY_COUNT; index++) write_text(HEADER_EEPROM_ADDRESS + index * HEADER_SIZE, defaults[index], HEADER_SIZE);
   write_text(LABEL_EEPROM_ADDRESS, "RF Matrix Switch", LABEL_SIZE);
 }
 
+// Extracts one bounded URL query value.
 void query_value(const char* request, const char* key, char* value, byte size) {
   value[0] = '\0';
   const char* start = strstr(request, key);
@@ -143,6 +160,7 @@ void query_value(const char* request, const char* key, char* value, byte size) {
   value[length] = '\0';
 }
 
+// Applies network and relay-mode settings from a request.
 void apply_network_config(const char* request) {
   char key[4], value[16], header[HEADER_SIZE], label[LABEL_SIZE];
   query_value(request, "count=", value, sizeof(value));
@@ -168,6 +186,7 @@ void apply_network_config(const char* request) {
   EEPROM.put(0, network_config);
 }
 
+// Applies the page label and relay headers from a request.
 void apply_headers_config(const char* request) {
   char key[4], header[HEADER_SIZE], label[LABEL_SIZE];
   if (strstr(request, "label=") != NULL) {
@@ -182,6 +201,7 @@ void apply_headers_config(const char* request) {
   }
 }
 
+// Sends standard HTTP headers for HTML content.
 void send_http_headers(EthernetClient& client) {
   client.println(F("HTTP/1.0 200 OK"));
   client.println(F("Content-Type: text/html"));
@@ -189,6 +209,7 @@ void send_http_headers(EthernetClient& client) {
   client.println();
 }
 
+// Renders the shared page header and opening HTML.
 void page_header(EthernetClient& client) {
   char label[LABEL_SIZE];
   read_text(LABEL_EEPROM_ADDRESS, label, sizeof(label));
@@ -200,10 +221,12 @@ void page_header(EthernetClient& client) {
   client.println(F("</h3></header>"));
 }
 
+// Renders action buttons and closes the HTML document.
 void page_footer(EthernetClient& client) {
   client.println(F("<footer><a href='/ee_clear'><button style='background:#aaa'>Clear</button></a><a href='/ee_save'><button style='background:#37f'>Save</button></a><a href='/ee_restore'><button style='background:#fc3'>Restore</button></a><a href='/network'><button style='background:#6c3'>Network</button></a><a href='/headers'><button style='background:#6c3'>Headers</button></a><hr></footer></body></html>"));
 }
 
+// Routes a request, performs its action, and renders a page.
 void send_page(EthernetClient& client, const char* request) {
   if (strstr(request, "GET /ee_clear") != NULL) clear_relays();
   if (strstr(request, "GET /ee_save") != NULL) save_eeprom();
@@ -259,6 +282,7 @@ void send_page(EthernetClient& client, const char* request) {
   page_footer(client);
 }
 
+// Toggles the selected relay command and applies exclusive mode.
 void toggle_relay(const char* request) {
   const char* parameter = strstr(request, "relay=");
   if (parameter == NULL) return;
@@ -271,12 +295,13 @@ void toggle_relay(const char* request) {
   update_relays();
 }
 
+// Initializes persistent state, I/O, Ethernet, and the server.
 void setup() {
   Serial.begin(115200);
   load_eeprom();
   for (byte index = 0; index < RELAY_COUNT; index++) {
-    pinMode(output_pins[index], OUTPUT);
-    if (index < 4) pinMode(input_pins[index], INPUT_PULLUP);
+    pinMode(2 + index, OUTPUT);
+    if (index < 4) pinMode(14 + index, INPUT_PULLUP);
   }
   update_relays();
   Ethernet.init(ETHERNET_CS_PIN);
@@ -288,6 +313,7 @@ void setup() {
   Serial.print(address[0]); Serial.print('.'); Serial.print(address[1]); Serial.print('.'); Serial.print(address[2]); Serial.print('.'); Serial.println(address[3]);
 }
 
+// Receives one HTTP request, responds, then closes the connection.
 void loop() {
   if (EthernetClient client = server.available()) {
     char request[160];
