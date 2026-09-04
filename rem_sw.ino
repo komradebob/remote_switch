@@ -61,16 +61,6 @@ unsigned char* read_relay_status() {
   return &feedback_status;
 }
 
-void print_feedback_status() {
-  read_relay_status();
-  Serial.print(F("Feedback inputs: "));
-  for (byte index = 0; index < RELAY_COUNT; index++) {
-    Serial.print((feedback_status >> index) & 1);
-    if (index < RELAY_COUNT - 1) Serial.print(',');
-  }
-  Serial.println();
-}
-
 void set_relay(byte index, bool enabled) {
   if (enabled) relay_status |= 1 << index;
   else relay_status &= ~(1 << index);
@@ -109,13 +99,6 @@ void clear_relays() {
   relay_state_dirty = true;
 }
 
-void clear_eeprom() {
-  for (int address = 0; address < EEPROM.length(); address++) EEPROM.update(address, 0xFF);
-  load_defaults();
-  clear_relays();
-  relay_state_dirty = false;
-}
-
 void print_ip(char* destination, size_t size, const byte address[4]) {
   snprintf(destination, size, "%u.%u.%u.%u", address[0], address[1], address[2], address[3]);
 }
@@ -146,6 +129,7 @@ void save_default_text() {
 }
 
 void query_value(const char* request, const char* key, char* value, byte size) {
+  value[0] = '\0';
   const char* start = strstr(request, key);
   if (start == NULL) return;
   start += strlen(key);
@@ -186,20 +170,29 @@ void apply_network_config(const char* request) {
 
 void apply_headers_config(const char* request) {
   char key[4], header[HEADER_SIZE], label[LABEL_SIZE];
-  query_value(request, "label=", label, sizeof(label));
-  write_text(LABEL_EEPROM_ADDRESS, label, LABEL_SIZE);
+  if (strstr(request, "label=") != NULL) {
+    query_value(request, "label=", label, sizeof(label));
+    write_text(LABEL_EEPROM_ADDRESS, label, LABEL_SIZE);
+  }
   for (byte index = 0; index < RELAY_COUNT; index++) {
     snprintf(key, sizeof(key), "h%u=", index);
     header[0] = '\0';
     query_value(request, key, header, sizeof(header));
-    write_text(HEADER_EEPROM_ADDRESS + index * HEADER_SIZE, header, HEADER_SIZE);
+    if (strstr(request, key) != NULL) write_text(HEADER_EEPROM_ADDRESS + index * HEADER_SIZE, header, HEADER_SIZE);
   }
+}
+
+void send_http_headers(EthernetClient& client) {
+  client.println(F("HTTP/1.0 200 OK"));
+  client.println(F("Content-Type: text/html"));
+  client.println(F("Connection: close"));
+  client.println();
 }
 
 void page_header(EthernetClient& client) {
   char label[LABEL_SIZE];
   read_text(LABEL_EEPROM_ADDRESS, label, sizeof(label));
-  client.println(F("HTTP/1.0 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n"));
+  send_http_headers(client);
   client.println(F("<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width'><title>Remote Switch Controller - KI2L</title><style>body{font:16px sans-serif;max-width:900px;margin:auto;padding:12px;text-align:center}header,footer{padding:12px 0;text-align:center}main{display:flex;justify-content:center}table{border-collapse:collapse;margin:20px auto}td,th{border:1px solid #ddd;padding:10px;text-align:center}button{padding:10px 14px;font-size:14px}.relay{width:100%;height:100%}.on{background:#8f8}.off{background:#f8b0b0}.header{background-color: "));
   client.print(relay_state_dirty ? F("#ff6666") : F("#66cc66"));
   client.print(F(";}a{margin-right:14px}.logo{display:block;margin:0 auto}</style></head><body><header class='header'><h3>Remote Switch Controller - KI2L</h3><img class='logo' src='https://w2sz.org/images/W2SZ_small.gif' alt='W2SZ'><h3>"));
@@ -208,45 +201,46 @@ void page_header(EthernetClient& client) {
 }
 
 void page_footer(EthernetClient& client) {
-  client.println(F("<footer><a href='/ee_clear'><button style='background:#aaa'>Clear</button></a><a href='/ee_wipe'><button style='background:#d66'>Wipe</button></a><a href='/ee_save'><button style='background:#37f'>Save</button></a><a href='/ee_restore'><button style='background:#fc3'>Restore</button></a><a href='/config'><button style='background:#6c3'>Config</button></a><hr></footer></body></html>"));
+  client.println(F("<footer><a href='/ee_clear'><button style='background:#aaa'>Clear</button></a><a href='/ee_save'><button style='background:#37f'>Save</button></a><a href='/ee_restore'><button style='background:#fc3'>Restore</button></a><a href='/network'><button style='background:#6c3'>Network</button></a><a href='/headers'><button style='background:#6c3'>Headers</button></a><hr></footer></body></html>"));
 }
 
 void send_page(EthernetClient& client, const char* request) {
   if (strstr(request, "GET /ee_clear") != NULL) clear_relays();
-  if (strstr(request, "GET /ee_wipe") != NULL) clear_eeprom();
   if (strstr(request, "GET /ee_save") != NULL) save_eeprom();
   if (strstr(request, "GET /ee_restore") != NULL) restore_eeprom();
   read_relay_status();
+  bool network_saved = strstr(request, "GET /network?") != NULL;
+  bool headers_saved = strstr(request, "GET /headers?") != NULL;
+  if (network_saved) apply_network_config(request);
+  if (headers_saved) apply_headers_config(request);
   if (strstr(request, "GET /config") != NULL) {
-    if (strstr(request, "GET /network?") != NULL) { apply_network_config(request); send_page(client, "GET /"); return; }
-    if (strstr(request, "GET /headers?") != NULL) { apply_headers_config(request); send_page(client, "GET /"); return; }
     page_header(client);
-    client.println(F("<main><h2>Configure</h2><p><a href='/network'><button>Network</button></a></p><p><a href='/headers'><button>Headers</button></a></p><p><a href='/'><button>Cancel</button></a></p></main>"));
+    client.println(F("<main><h2>Configure System</h2><p><a href='/network'><button>Network</button></a></p><p><a href='/headers'><button>Headers</button></a></p><p><a href='/'><button>Cancel</button></a></p></main>"));
     page_footer(client);
     return;
   }
-  if (strstr(request, "GET /network") != NULL) {
+  if (strstr(request, "GET /network") != NULL && !network_saved) {
     char ip[16], gateway[16], dns[16], subnet[16];
     print_ip(ip, sizeof(ip), network_config.ip); print_ip(gateway, sizeof(gateway), network_config.gateway); print_ip(dns, sizeof(dns), network_config.dns); print_ip(subnet, sizeof(subnet), network_config.subnet);
     page_header(client);
     client.print(F("<main><h2>Network</h2><form action='/network' method='get'>Relays <select name='count'>"));
     for (byte count = 1; count <= RELAY_COUNT; count++) { client.print(F("<option value='")); client.print(count); if (count == active_relay_count()) client.print(F("' selected>")); else client.print(F("'>")); client.print(count); client.println(F("</option>")); }
-    client.print(F("</select><br>Exclusive <input type='checkbox' name='exclusive' value='1'")); if (exclusive_relays()) client.print(F(" checked")); client.print(F("><br>DHCP <input type='checkbox' name='dhcp' value='1'")); if (use_dhcp()) client.print(F(" checked")); client.print(F("><br>IP <input name='ip' value='")); client.print(ip); client.print(F("'><br>Gateway <input name='gateway' value='")); client.print(gateway); client.print(F("'><br>DNS <input name='dns' value='")); client.print(dns); client.print(F("'><br>Subnet <input name='subnet' value='")); client.print(subnet); client.println(F("'><br><button type='submit'>Save network</button> <a href='/config'><button type='button'>Cancel</button></a></form></main>"));
+    client.print(F("</select><br>Exclusive <input type='checkbox' name='exclusive' value='1'")); if (exclusive_relays()) client.print(F(" checked")); client.print(F("><br>DHCP <input type='checkbox' name='dhcp' value='1'")); if (use_dhcp()) client.print(F(" checked")); client.print(F("><br>IP <input name='ip' value='")); client.print(ip); client.print(F("'><br>Gateway <input name='gateway' value='")); client.print(gateway); client.print(F("'><br>DNS <input name='dns' value='")); client.print(dns); client.print(F("'><br>Subnet <input name='subnet' value='")); client.print(subnet); client.println(F("'><br><button type='submit'>Save network</button> <a href='/'><button type='button'>Cancel</button></a></form></main>"));
     page_footer(client);
     return;
   }
-  if (strstr(request, "GET /headers") != NULL) {
+  if (strstr(request, "GET /headers") != NULL && !headers_saved) {
     char label[LABEL_SIZE], header[HEADER_SIZE];
     read_text(LABEL_EEPROM_ADDRESS, label, sizeof(label));
     page_header(client);
     client.print(F("<main><h2>Headers</h2><form action='/headers' method='get'>Label <input maxlength='20' name='label' value='")); client.print(label); client.println(F("'><br>"));
     for (byte index = 0; index < RELAY_COUNT; index++) { read_text(HEADER_EEPROM_ADDRESS + index * HEADER_SIZE, header, sizeof(header)); client.print(F("Column ")); client.print(index + 1); client.print(F(" <input maxlength='8' name='h")); client.print(index); client.print(F("' value='")); client.print(header); client.println(F("'><br>")); }
-    client.println(F("<button type='submit'>Save headers</button> <a href='/config'><button type='button'>Cancel</button></a></form></main>"));
+    client.println(F("<button type='submit'>Save headers</button> <a href='/'><button type='button'>Cancel</button></a></form></main>"));
     page_footer(client);
     return;
   }
   page_header(client);
-  print_feedback_status();
+  read_relay_status();
   client.println(F("<main><table><tr>"));
   for (byte index = 0; index < active_relay_count(); index++) {
     char header[HEADER_SIZE];
@@ -296,17 +290,17 @@ void setup() {
 
 void loop() {
   if (EthernetClient client = server.available()) {
-    char request[224];
+    char request[160];
     byte length = 0;
     unsigned long deadline = millis() + 500;
-    bool complete = false;
-    while (client.connected() && millis() < deadline && !complete) {
+    bool request_complete = false;
+    while (client.connected() && millis() < deadline && !request_complete) {
       if (client.available() == 0) continue;
       char character = client.read();
-      if (character == '\n') complete = true;
+      if (character == '\n') request_complete = true;
       else if (character != '\r' && length < sizeof(request) - 1) request[length++] = character;
     }
-    if (complete) {
+    if (request_complete) {
       request[length] = '\0';
       if (strncmp(request, "GET /toggle", 11) == 0) toggle_relay(request);
       send_page(client, request);
