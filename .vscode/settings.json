@@ -1,0 +1,12 @@
+{
+  "files.associations": {
+    "*.ino": "cpp"
+  },
+  "vim.cursorStylePerMode.normal": "block",
+  "vim.cursorStylePerMode.replace": "block-outline",
+  "vim.cursorStylePerMode.visual": "block",
+  "vim.cursorStylePerMode.insert": "underline",
+  "vim.history": 500,
+  "vim.matchpairs": "(:),{:},[:],\":\",':'",
+  "vim.shell": "/bin/bash"
+}
