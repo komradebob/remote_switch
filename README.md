@@ -17,6 +17,12 @@ Just To Make Sure.
 
 To keep you informed, the header on the dashboard is green when the state is saved, red when it is not.
 
+## NOTE:  The MAC Address is hardcoded! If you are going to put more than one of these on your network, change the last octet!!!
+
+I tried to implement selection of a random MAC every time the system booted, however it was causing instability and I ran out of time. 
+If you know of a solution or fix it, please let me know!!!
+
+
 ## Libraries
 
 Install the stock `UIPEthernet` library through the Arduino Library Manager. The sketch uses the Pro Mini hardware SPI pins for the 
