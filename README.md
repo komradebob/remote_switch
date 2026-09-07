@@ -1,4 +1,4 @@
-# rem_sw Arduino relay web server
+# rem_sw Ethernet Arduino relay controller with HTTP server
 
 Software to control one to 6 relays. My original project was a 6x4 RF switch, this has grown/devolved from that initially to control a 
 Single Pole 6 Throw (SP6T) coaxial RF switch used with an ICOM IC-905 to switch the outputs of the radio to the correct antennas at the
@@ -17,7 +17,7 @@ Just To Make Sure.
 
 To keep you informed, the header on the dashboard is green when the state is saved, red when it is not.
 
-## NOTE:  The MAC Address is hardcoded! If you are going to put more than one of these on your network, change the last octet!!!
+## NOTE:  The MAC Address is _hard coded_! If you are going to put more than one of these on your network, change the last octet!!!
 
 I tried to implement selection of a random MAC every time the system booted, however it was causing instability and I ran out of time. 
 If you know of a solution or fix it, please let me know!!!
